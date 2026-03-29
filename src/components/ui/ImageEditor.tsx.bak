@@ -1,0 +1,1815 @@
+import { useState, useEffect, useRef } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { X, Wand2, Loader2, Image as ImageIcon, Zap, Sparkles, Sun, Palette, Maximize, Trash2, Check, ArrowRight, ChevronDown, ChevronUp, Sliders, RotateCcw, History, SunMedium, Contrast, Droplets, Eye, Settings2, Brush, Eraser, Upload, Layers, Users } from 'lucide-react'
+import { blink } from '../../blink/client'
+import { useAuth } from '../../hooks/useAuth'
+import { cn } from '@/lib/utils'
+
+interface ImageEditorProps {
+  url: string
+  onClose: () => void
+  onApplyResult?: (url: string) => void
+}
+
+const STYLE_EDITS = [
+  { label: 'Cyberpunk', prompt: 'Apply a cyberpunk neon-lit aesthetic with vibrant glowing colors' },
+  { label: 'Watercolor Sketch', prompt: 'Convert to a beautiful watercolor sketch with visible brush strokes and pencil outlines' },
+  { label: 'Pastel Goth', prompt: 'Apply a pastel goth aesthetic combining dark/spooky elements with soft pastel colors' },
+  { label: 'Pixel Art', prompt: 'Convert to high-quality 8-bit or 16-bit pixel art style' },
+  { label: 'Synthwave', prompt: 'Apply a 1980s synthwave retro-futuristic style with purple and pink gradients' },
+  { label: 'Steampunk', prompt: 'Transform into a steampunk aesthetic with gears, brass, and Victorian industrial elements' },
+  { label: 'Anime', prompt: 'Convert to high-quality modern anime style' },
+  { label: 'Line Art', prompt: 'Convert to minimalist clean line art' },
+  { label: 'Oil Painting', prompt: 'Transform into a classic textured oil painting' },
+]
+
+const ENHANCE_EDITS = [
+  { label: 'Remove BG', prompt: 'Remove the background completely and make it transparent', icon: <Trash2 size={12} /> },
+  { label: 'Upscale 4K', prompt: 'Upscale this image to 4K resolution with extreme detail enhancement', icon: <Maximize size={12} /> },
+  { label: 'Retouch', prompt: 'Professionally retouch face and skin, improve clarity', icon: <Sparkles size={12} /> },
+  { label: 'Fix Colors', prompt: 'Auto-correct colors and contrast for a professional look', icon: <Zap size={12} /> },
+]
+
+const LIGHTING_EDITS = [
+  { label: 'Golden Hour', prompt: 'Add warm golden hour sunset lighting' },
+  { label: 'Dramatic', prompt: 'Add dramatic high-contrast lighting and shadows' },
+  { label: 'Studio', prompt: 'Apply professional studio lighting' },
+  { label: 'Neon Glow', prompt: 'Add glowing neon accents and colored lights' },
+]
+
+const FILTER_PRESETS = [
+  { label: 'Vivid', filter: 'saturate(1.5) contrast(1.1) brightness(1.05)', prompt: 'Make colors vivid and pop with increased saturation and contrast' },
+  { label: 'Noir', filter: 'grayscale(1) contrast(1.2)', prompt: 'Convert to a high-contrast black and white noir style' },
+  { label: 'Vintage', filter: 'sepia(0.3) saturate(0.8) contrast(0.9)', prompt: 'Apply a vintage film look with warm sepia tones and muted colors' },
+  { label: 'Cinematic', filter: 'hue-rotate(-10deg) saturate(1.2) contrast(1.1)', prompt: 'Apply a cinematic teal and orange color grade' },
+  { label: 'Cool', filter: 'hue-rotate(180deg) saturate(0.8)', prompt: 'Apply a cool, blue-toned atmosphere' },
+  { label: 'Warm', filter: 'sepia(0.2) hue-rotate(-10deg) saturate(1.3)', prompt: 'Apply a warm, golden sun-kissed filter' },
+]
+
+const STYLE_TRANSFER_PRESETS = [
+  { label: 'Starry Night', url: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?q=80&w=500&auto=format&fit=crop' },
+  { label: 'Van Gogh', url: 'https://images.unsplash.com/photo-1701960126065-7a3f6cd98168?q=80&w=500&auto=format&fit=crop' },
+  { label: 'Claude Monet', url: 'https://images.unsplash.com/photo-1689018905300-46fda719fe42?q=80&w=500&auto=format&fit=crop' },
+  { label: 'Renaissance', url: 'https://images.unsplash.com/photo-1733578873730-df08f202bdce?q=80&w=500&auto=format&fit=crop' },
+  { label: 'Cyberpunk', url: 'https://images.unsplash.com/photo-1573767291321-c0af2eaf5266?q=80&w=500&auto=format&fit=crop' },
+  { label: 'Watercolor', url: 'https://images.unsplash.com/photo-1713731267883-2e1486c3469b?q=80&w=500&auto=format&fit=crop' },
+  { label: 'Pencil Sketch', url: 'https://images.unsplash.com/photo-1582202142946-b1b9dc9f811?q=80&w=500&auto=format&fit=crop' },
+  { label: 'Abstract Oil', url: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?q=80&w=500&auto=format&fit=crop' },
+]
+
+const LOADING_MESSAGES = [
+  "Analyzing pixels...",
+  "Applying magic...",
+  "Polishing details...",
+  "Rendering final image...",
+  "Almost there...",
+  "Finishing touches...",
+]
+
+export function ImageEditor({ url, onClose, onApplyResult }: ImageEditorProps) {
+  const { user } = useAuth()
+  const [prompt, setPrompt] = useState('')
+  const [intensity, setIntensity] = useState(50)
+  const [adjustments, setAdjustments] = useState({
+    brightness: 100,
+    contrast: 100,
+    saturation: 100,
+    hue: 0,
+    blur: 0,
+  })
+  const [history, setHistory] = useState<string[]>([url])
+  const [historyIndex, setHistoryIndex] = useState(0)
+  const [isLoading, setIsLoading] = useState(false)
+  const [loadingMsgIndex, setLoadingMsgIndex] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'style' | 'adjust' | 'filters' | 'lighting' | 'brush' | 'transfer' | 'batch'>('style')
+  const [enhancementsOpen, setEnhancementsOpen] = useState(false)
+  const [selectedEffect, setSelectedEffect] = useState<string | null>(null)
+  const [showOriginal, setShowOriginal] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+
+  // Batch Processing State
+  const [batchUrls, setBatchUrls] = useState<string[]>([])
+  const [batchResults, setBatchResults] = useState<{ original: string; edited: string }[]>([])
+  const [isProcessingBatch, setIsProcessingBatch] = useState(false)
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 })
+
+  // Style Transfer State
+  const [referenceUrl, setReferenceUrl] = useState<string | null>(null)
+  const [isUploadingReference, setIsUploadingReference] = useState(false)
+  const [customStyles, setCustomStyles] = useState<{ url: string; timestamp: number }[]>([])
+  const [styleIntensity, setStyleIntensity] = useState(80)
+  const [contentPreservation, setContentPreservation] = useState(70)
+  const [colorPreservation, setColorPreservation] = useState(20)
+  const [textureDetail, setTextureDetail] = useState(50)
+  const [transferMethod, setTransferMethod] = useState<'neural' | 'cyclegan' | 'wgan'>('neural')
+  const [isHighQuality, setIsHighQuality] = useState(false)
+
+  // Brush State
+  const [brushSize, setBrushSize] = useState(20)
+  const [isEraser, setIsEraser] = useState(false)
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [hasMask, setHasMask] = useState(false)
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
+  const [isHoveringCanvas, setIsHoveringCanvas] = useState(false)
+  
+  // Collaboration State
+  const [onlineUsers, setOnlineUsers] = useState<any[]>([])
+  const [remoteBrushPos, setRemoteBrushPos] = useState<Record<string, { x: number; y: number; color: string }>>({})
+  const channelRef = useRef<any>(null)
+  const isRemoteUpdate = useRef(false)
+
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const maskCanvasRef = useRef<HTMLCanvasElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
+
+  // Loading message rotation
+  useEffect(() => {
+    let interval: any
+    if (isLoading) {
+      interval = setInterval(() => {
+        setLoadingMsgIndex((prev) => (prev + 1) % LOADING_MESSAGES.length)
+      }, 1500)
+    } else {
+      setLoadingMsgIndex(0)
+    }
+    return () => clearInterval(interval)
+  }, [isLoading])
+
+  const currentUrl = history[historyIndex]
+
+  const handleReferenceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsUploadingReference(true)
+    setError(null)
+
+    try {
+      const { publicUrl } = await blink.storage.upload(
+        file,
+        `style-references/${Date.now()}.${file.name.split('.').pop()}`
+      )
+      setReferenceUrl(publicUrl)
+      setCustomStyles(prev => [{ url: publicUrl, timestamp: Date.now() }, ...prev])
+    } catch (e) {
+      setError('Failed to upload reference image.')
+    } finally {
+      setIsUploadingReference(false)
+    }
+  }
+
+  const handleEdit = async (editPrompt: string, overrideIntensity?: number) => {
+    const isStyleTransfer = activeTab === 'transfer' && referenceUrl
+    if ((!editPrompt.trim() && !isStyleTransfer) || isLoading) return
+    
+    setIsLoading(true)
+    setError(null)
+
+    const finalIntensity = overrideIntensity ?? intensity
+    
+    // Bake adjustments into prompt
+    const adjStrings = []
+    if (adjustments.brightness !== 100) adjStrings.push(`brightness: ${adjustments.brightness}%`)
+    if (adjustments.contrast !== 100) adjStrings.push(`contrast: ${adjustments.contrast}%`)
+    if (adjustments.saturation !== 100) adjStrings.push(`saturation: ${adjustments.saturation}%`)
+    if (adjustments.hue !== 0) adjStrings.push(`hue-rotate: ${adjustments.hue}deg`)
+    
+    const adjustmentPrompt = adjStrings.length > 0 
+      ? ` With adjustments: ${adjStrings.join(', ')}.` 
+      : ''
+
+    let finalImages = [currentUrl]
+    let finalPrompt = editPrompt
+
+    if (isStyleTransfer) {
+      const methodDesc = 
+        transferMethod === 'cyclegan' ? 'Using generative adversarial domain translation (CycleGAN style) for high structural mapping.' :
+        transferMethod === 'wgan' ? 'Using Wasserstein GAN synthesis for stable, realistic texture reproduction.' :
+        'Using neural fusion for artistic style integration.'
+
+      if (hasMask && maskCanvasRef.current) {
+        try {
+          const maskBlob = await new Promise<Blob>((resolve) => maskCanvasRef.current!.toBlob((b) => resolve(b!), 'image/png'))
+          const { publicUrl: maskUrl } = await blink.storage.upload(maskBlob, `masks/mask-${Date.now()}.png`)
+          finalImages = [currentUrl, referenceUrl!, maskUrl]
+          finalPrompt = `In the area marked by image 3, apply the artistic style, color palette, and textures from image 2. 
+            Maintain the rest of image 1 exactly as it is. 
+            ${methodDesc}
+            Style influence: ${styleIntensity}%. 
+            Structural preservation: ${contentPreservation}%. 
+            Original color retention: ${colorPreservation}%. 
+            Texture fidelity: ${textureDetail}%.
+            The resulting transformation within the mask MUST be a seamless fusion.${adjustmentPrompt}`
+        } catch (e) {
+          console.error('Mask upload failed', e)
+          // Fallback to global
+          finalImages = [currentUrl, referenceUrl!]
+          finalPrompt = `${editPrompt || 'Apply artistic style and color palette from second image to first'}. 
+            ${methodDesc}
+            Style influence: ${styleIntensity}%. 
+            Structural subject preservation: ${contentPreservation}%. 
+            Original color retention: ${colorPreservation}%. 
+            Texture & surface detail fidelity: ${textureDetail}%.
+            The result MUST be a seamless fusion: maintain the exact layout and core subject of image 1, while applying the artistic textures, lighting, and aesthetic of image 2.${adjustmentPrompt}`
+        }
+      } else {
+        finalImages = [currentUrl, referenceUrl!]
+        finalPrompt = `${editPrompt || 'Apply artistic style and color palette from second image to first'}. 
+          ${methodDesc}
+          Style influence: ${styleIntensity}%. 
+          Structural subject preservation: ${contentPreservation}%. 
+          Original color retention: ${colorPreservation}%. 
+          Texture & surface detail fidelity: ${textureDetail}%.
+          The result MUST be a seamless fusion: maintain the exact layout and core subject of image 1, while applying the artistic textures, lighting, and aesthetic of image 2.${adjustmentPrompt}`
+      }
+    } else if (activeTab === 'brush' && hasMask && maskCanvasRef.current) {
+      try {
+        const maskBlob = await new Promise<Blob>((resolve) => maskCanvasRef.current!.toBlob((b) => resolve(b!), 'image/png'))
+        const { publicUrl: maskUrl } = await blink.storage.upload(maskBlob, `masks/mask-${Date.now()}.png`)
+        finalImages = [currentUrl, maskUrl]
+        finalPrompt = `In the area marked by the mask, ${editPrompt}. Maintain the rest of the image exactly as it is.`
+      } catch (e) {
+        console.error('Mask upload failed', e)
+      }
+    } else {
+      if (activeTab === 'style' || activeTab === 'lighting') {
+        finalPrompt = `${editPrompt}. Apply this with ${finalIntensity}% intensity.${adjustmentPrompt}`
+      } else {
+        finalPrompt = `${editPrompt}.${adjustmentPrompt}`
+      }
+    }
+
+    try {
+      const { data } = await blink.ai.modifyImage({
+        images: finalImages,
+        prompt: finalPrompt,
+        model: isHighQuality ? 'fal-ai/nano-banana-pro/edit' : 'fal-ai/nano-banana/edit',
+      })
+      const newUrl = data[0]?.url || null
+      if (newUrl) {
+        const newHistory = history.slice(0, historyIndex + 1)
+        newHistory.push(newUrl)
+        setHistory(newHistory)
+        setHistoryIndex(newHistory.length - 1)
+        clearMask()
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Edit failed. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleBatchUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    setIsLoading(true);
+    setError(null);
+    setBatchUrls([]);
+    setBatchResults([]);
+    setIsProcessingBatch(false);
+    setBatchProgress({ current: 0, total: 0 });
+
+    const uploadedUrls: string[] = [];
+    try {
+      for (const file of files) {
+        const { publicUrl } = await blink.storage.upload(
+          file,
+          `batch-uploads/${Date.now()}.${file.name.split('.').pop()}`
+        );
+        uploadedUrls.push(publicUrl);
+      }
+      setBatchUrls(uploadedUrls);
+      setBatchProgress({ current: 0, total: uploadedUrls.length });
+      setIsProcessingBatch(true); // Enable processing button
+    } catch (e) {
+      setError('Failed to upload batch images.');
+      setIsLoading(false);
+    }
+  };
+
+  const processBatch = async () => {
+    const isStyleTransfer = !!referenceUrl
+    if (batchUrls.length === 0 || (!prompt.trim() && !isStyleTransfer)) return
+
+    setIsProcessingBatch(true)
+    setBatchResults([])
+    setBatchProgress({ current: 0, total: batchUrls.length })
+
+    // Bake adjustments for batch
+    const adjStrings = []
+    if (adjustments.brightness !== 100) adjStrings.push(`brightness: ${adjustments.brightness}%`)
+    if (adjustments.contrast !== 100) adjStrings.push(`contrast: ${adjustments.contrast}%`)
+    if (adjustments.saturation !== 100) adjStrings.push(`saturation: ${adjustments.saturation}%`)
+    if (adjustments.hue !== 0) adjStrings.push(`hue-rotate: ${adjustments.hue}deg`)
+    const adjustmentPrompt = adjStrings.length > 0 ? ` With adjustments: ${adjStrings.join(', ')}.` : ''
+
+    for (let i = 0; i < batchUrls.length; i++) {
+      try {
+        const bUrl = batchUrls[i]
+        let bFinalImages = [bUrl]
+        let bFinalPrompt = prompt
+
+        if (isStyleTransfer) {
+          const methodDesc = 
+            transferMethod === 'cyclegan' ? 'Using generative adversarial domain translation (CycleGAN style) for high structural mapping.' :
+            transferMethod === 'wgan' ? 'Using Wasserstein GAN synthesis for stable, realistic texture reproduction.' :
+            'Using neural fusion for artistic style integration.'
+
+          bFinalImages = [bUrl, referenceUrl!]
+          bFinalPrompt = `${prompt || 'Apply artistic style and color palette from second image to first'}. 
+            ${methodDesc}
+            Style influence: ${styleIntensity}%. 
+            Structural subject preservation: ${contentPreservation}%. 
+            Original color retention: ${colorPreservation}%. 
+            Texture & surface detail fidelity: ${textureDetail}%.
+            Ensure the resulting image follows the artistic aesthetic of the second image while keeping the core subject and layout of the first image.${adjustmentPrompt}`
+        } else {
+          bFinalPrompt = `${prompt}. Apply this with ${intensity}% intensity.${adjustmentPrompt}`
+        }
+
+        const { data } = await blink.ai.modifyImage({
+          images: bFinalImages,
+          prompt: bFinalPrompt,
+          model: isHighQuality ? 'fal-ai/nano-banana-pro/edit' : 'fal-ai/nano-banana/edit',
+        })
+
+        if (data[0]?.url) {
+          setBatchResults(prev => [...prev, { original: bUrl, edited: data[0].url }])
+        }
+      } catch (e) {
+        console.error(`Batch processing failed for image ${i}:`, e)
+      }
+      setBatchProgress(prev => ({ ...prev, current: i + 1 }))
+    }
+    setIsProcessingBatch(false)
+  }
+
+  // Canvas Logic
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTab !== 'brush') return
+    setIsDrawing(true)
+    
+    // Broadcast start
+    if (channelRef.current && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect()
+      let clientX, clientY
+      if ('touches' in e) {
+        clientX = e.touches[0].clientX
+        clientY = e.touches[0].clientY
+      } else {
+        clientX = e.clientX
+        clientY = e.clientY
+      }
+      const x = (clientX - rect.left) * (canvasRef.current.width / rect.width)
+      const y = (clientY - rect.top) * (canvasRef.current.height / rect.height)
+      channelRef.current.publish('brush', { x, y, size: brushSize, isEraser, isStart: true })
+    }
+
+    draw(e)
+  }
+
+  const stopDrawing = () => {
+    setIsDrawing(false)
+    const ctx = maskCanvasRef.current?.getContext('2d')
+    if (ctx) {
+      ctx.beginPath()
+    }
+  }
+
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    let clientX, clientY
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX
+      clientY = e.touches[0].clientY
+    } else {
+      clientX = e.clientX
+      clientY = e.clientY
+    }
+
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+    setMousePos({ x, y })
+
+    // Broadcast position
+    if (channelRef.current) {
+      channelRef.current.publish('brush-pos', { x, y })
+    }
+
+    if (!isDrawing || activeTab !== 'brush' || !maskCanvasRef.current) return
+
+    const maskCanvas = maskCanvasRef.current
+    const ctx = canvas.getContext('2d')
+    const maskCtx = maskCanvas.getContext('2d')
+    if (!ctx || !maskCtx) return
+
+    // Scale coordinates if canvas internal size differs from display size
+    const scaleX = canvas.width / rect.width
+    const scaleY = canvas.height / rect.height
+    const scaledX = x * scaleX
+    const scaledY = y * scaleY
+
+    ctx.lineWidth = brushSize * scaleX
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    
+    maskCtx.lineWidth = brushSize * scaleX
+    maskCtx.lineCap = 'round'
+    maskCtx.lineJoin = 'round'
+
+    if (isEraser) {
+      ctx.globalCompositeOperation = 'destination-out'
+      maskCtx.globalCompositeOperation = 'destination-out'
+    } else {
+      ctx.globalCompositeOperation = 'source-over'
+      maskCtx.globalCompositeOperation = 'source-over'
+      ctx.strokeStyle = 'rgba(124, 58, 237, 0.5)' // Primary color with alpha
+      maskCtx.strokeStyle = '#ffffff' // White for mask
+    }
+
+    ctx.lineTo(scaledX, scaledY)
+    ctx.stroke()
+    
+    maskCtx.lineTo(scaledX, scaledY)
+    maskCtx.stroke()
+    
+    // Broadcast draw point
+    if (channelRef.current) {
+      channelRef.current.publish('brush', { 
+        x: scaledX, 
+        y: scaledY, 
+        size: brushSize * scaleX, 
+        isEraser, 
+        isStart: false 
+      })
+    }
+
+    setHasMask(true)
+  }
+
+  const clearMask = () => {
+    const ctx = canvasRef.current?.getContext('2d')
+    const maskCtx = maskCanvasRef.current?.getContext('2d')
+    if (ctx && maskCtx) {
+      ctx.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height)
+      maskCtx.fillStyle = '#000000'
+      maskCtx.fillRect(0, 0, maskCanvasRef.current!.width, maskCanvasRef.current!.height)
+      setHasMask(false)
+    }
+  }
+
+  // Initialize mask canvas with black
+  useEffect(() => {
+    if (maskCanvasRef.current) {
+      const ctx = maskCanvasRef.current.getContext('2d')
+      if (ctx) {
+        ctx.fillStyle = '#000000'
+        ctx.fillRect(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height)
+      }
+    }
+  }, [activeTab])
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      setHistoryIndex(historyIndex - 1)
+    }
+  }
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      setHistoryIndex(historyIndex + 1)
+    }
+  }
+
+  const handleReset = () => {
+    setHistoryIndex(0)
+    setAdjustments({
+      brightness: 100,
+      contrast: 100,
+      saturation: 100,
+      hue: 0,
+      blur: 0,
+    })
+    setSelectedEffect(null)
+    setPrompt('')
+    setReferenceUrl(null)
+    setStyleIntensity(80)
+    setContentPreservation(70)
+    setColorPreservation(20)
+    setTextureDetail(50)
+    setTransferMethod('neural')
+    setIsHighQuality(false)
+    clearMask()
+    setBatchUrls([])
+    setBatchResults([])
+    setIsProcessingBatch(false)
+    setBatchProgress({ current: 0, total: 0 })
+  }
+
+  const getFilterString = () => {
+    return `brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%) hue-rotate(${adjustments.hue}deg) blur(${adjustments.blur}px)`
+  }
+
+  // Collaboration Logic
+  useEffect(() => {
+    if (!user?.id || !url) return
+
+    let channel: any = null
+    let mounted = true
+
+    const connectToCollaboration = async () => {
+      try {
+        // Use a unique channel for this specific image
+        const channelId = `image-editor-${btoa(url).slice(0, 32)}`
+        channel = blink.realtime.channel(channelId)
+        channelRef.current = channel
+
+        const colors = ['#7c3aed', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#ef4444']
+        const userColor = colors[Math.floor(Math.random() * colors.length)]
+
+        await channel.subscribe({
+          userId: user.id,
+          metadata: { 
+            displayName: user.displayName || 'Anonymous',
+            avatar: user.avatarUrl,
+            status: 'editing',
+            color: userColor
+          }
+        })
+
+        if (!mounted) return
+
+        // Listen for presence
+        channel.onPresence((users: any[]) => {
+          if (!mounted) return
+          setOnlineUsers(users)
+        })
+
+        // Listen for messages (state sync)
+        channel.onMessage((msg: any) => {
+          if (!mounted || msg.userId === user.id) return
+
+          isRemoteUpdate.current = true
+          
+          if (msg.type === 'adjustment') {
+            setAdjustments(msg.data)
+          } else if (msg.type === 'tab') {
+            setActiveTab(msg.data)
+          } else if (msg.type === 'prompt') {
+            setPrompt(msg.data)
+          } else if (msg.type === 'brush') {
+            handleRemoteDraw(msg.data)
+          } else if (msg.type === 'brush-pos') {
+            setRemoteBrushPos(prev => ({
+              ...prev,
+              [msg.userId]: { ...msg.data, color: msg.metadata?.color || '#7c3aed' }
+            }))
+          }
+
+          setTimeout(() => {
+            isRemoteUpdate.current = false
+          }, 50)
+        })
+
+      } catch (err) {
+        console.error('Collaboration error:', err)
+      }
+    }
+
+    connectToCollaboration()
+
+    return () => {
+      mounted = false
+      channel?.unsubscribe()
+      channelRef.current = null
+    }
+  }, [user?.id, url])
+
+  // Sync state changes
+  useEffect(() => {
+    if (isRemoteUpdate.current || !channelRef.current) return
+    channelRef.current.publish('adjustment', adjustments)
+  }, [adjustments])
+
+  useEffect(() => {
+    if (isRemoteUpdate.current || !channelRef.current) return
+    channelRef.current.publish('tab', activeTab)
+  }, [activeTab])
+
+  useEffect(() => {
+    if (isRemoteUpdate.current || !channelRef.current) return
+    channelRef.current.publish('prompt', prompt)
+  }, [prompt])
+
+  const handleRemoteDraw = (data: any) => {
+    const { x, y, size, isEraser, isStart } = data
+    const canvas = canvasRef.current
+    const maskCanvas = maskCanvasRef.current
+    if (!canvas || !maskCanvas) return
+
+    const ctx = canvas.getContext('2d')
+    const maskCtx = maskCanvas.getContext('2d')
+    if (!ctx || !maskCtx) return
+
+    if (isStart) {
+      ctx.beginPath()
+      maskCtx.beginPath()
+      ctx.moveTo(x, y)
+      maskCtx.moveTo(x, y)
+      return
+    }
+
+    ctx.lineWidth = size
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    maskCtx.lineWidth = size
+    maskCtx.lineCap = 'round'
+    maskCtx.lineJoin = 'round'
+
+    if (isEraser) {
+      ctx.globalCompositeOperation = 'destination-out'
+      maskCtx.globalCompositeOperation = 'destination-out'
+    } else {
+      ctx.globalCompositeOperation = 'source-over'
+      maskCtx.globalCompositeOperation = 'source-over'
+      ctx.strokeStyle = 'rgba(124, 58, 237, 0.5)'
+      maskCtx.strokeStyle = '#ffffff'
+    }
+
+    ctx.lineTo(x, y)
+    ctx.stroke()
+    maskCtx.lineTo(x, y)
+    maskCtx.stroke()
+    
+    // Reset to local settings
+    ctx.globalCompositeOperation = 'source-over'
+    maskCtx.globalCompositeOperation = 'source-over'
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-black/95 backdrop-blur-2xl flex items-center justify-center p-4 sm:p-8 overflow-hidden"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0, y: 40 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0, y: 40 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-card border border-white/10 rounded-[3rem] shadow-2xl w-full max-w-7xl h-full max-h-[94vh] flex flex-col relative overflow-hidden ring-1 ring-white/5"
+      >
+        {/* Modern Header */}
+        <div className="flex items-center justify-between px-10 py-6 border-b border-white/5 shrink-0 bg-background/40 backdrop-blur-xl sticky top-0 z-30">
+          <div className="flex items-center gap-5">
+            <motion.div 
+              whileHover={{ rotate: 180 }}
+              transition={{ duration: 0.6 }}
+              className="w-14 h-14 rounded-[1.25rem] bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20"
+            >
+              <Wand2 size={28} className="text-white" />
+            </motion.div>
+            <div>
+              <h3 className="font-black text-2xl tracking-tighter leading-none mb-1.5 flex items-center gap-2">
+                Creative Studio
+                <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">v2.0</span>
+              </h3>
+              <div className="flex items-center gap-2.5">
+                <div className="flex -space-x-1">
+                  {[1, 2, 3].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-emerald-500/40 animate-pulse" style={{ animationDelay: `${i * 200}ms` }} />)}
+                </div>
+                <p className="text-[10px] uppercase font-black tracking-[0.2em] text-muted-foreground/50">Neural Image Processing Engine</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Collaboration Presence */}
+          <div className="hidden lg:flex items-center gap-3 px-4 py-2 bg-white/5 rounded-full border border-white/5">
+            <div className="flex -space-x-2">
+              {onlineUsers.map((u, i) => (
+                <motion.div
+                  key={u.userId}
+                  initial={{ scale: 0, x: -10 }}
+                  animate={{ scale: 1, x: 0 }}
+                  className="relative group"
+                >
+                  <div 
+                    className="w-8 h-8 rounded-full border-2 border-background bg-muted flex items-center justify-center overflow-hidden"
+                    style={{ borderColor: i === 0 ? 'hsl(var(--primary))' : 'transparent' }}
+                  >
+                    {u.metadata?.avatar ? (
+                      <img src={u.metadata.avatar} alt={u.metadata.displayName} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-[10px] font-black">{u.metadata?.displayName?.charAt(0) || 'U'}</span>
+                    )}
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-[8px] font-black uppercase rounded pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+                    {u.metadata?.displayName} {u.userId === user?.id ? '(You)' : ''}
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{onlineUsers.length} ONLINE</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex items-center glass p-1.5 rounded-[1.25rem] border-white/5 relative">
+              <button 
+                onClick={handleUndo}
+                disabled={historyIndex === 0 || isLoading}
+                className="p-3 rounded-xl hover:bg-white/5 transition-all disabled:opacity-20 text-muted-foreground hover:text-primary group"
+                title="Undo"
+              >
+                <RotateCcw size={20} className="-scale-x-100 group-active:rotate-[-45deg] transition-transform" />
+              </button>
+              
+              <button 
+                onClick={() => setShowHistory(!showHistory)}
+                disabled={history.length <= 1 || isLoading}
+                className={cn(
+                  "p-3 rounded-xl hover:bg-white/5 transition-all disabled:opacity-20 flex items-center gap-2 px-4",
+                  showHistory ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-muted-foreground hover:text-primary"
+                )}
+                title="History"
+              >
+                <History size={20} />
+                <span className="text-xs font-black tracking-tighter">{historyIndex + 1} / {history.length}</span>
+              </button>
+
+              <AnimatePresence>
+                {showHistory && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 15, scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 15, scale: 0.9 }}
+                    className="absolute top-full right-0 mt-4 w-72 glass border-white/10 rounded-[2rem] shadow-2xl z-50 overflow-hidden ring-1 ring-black/50"
+                  >
+                    <div className="p-4 border-b border-white/5 bg-white/5">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Version Timeline</p>
+                    </div>
+                    <div className="max-h-[400px] overflow-y-auto p-3 space-y-2 custom-scrollbar">
+                      {history.map((url, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => { setHistoryIndex(idx); setShowHistory(false); }}
+                          className={cn(
+                            "w-full flex items-center gap-4 p-2.5 rounded-2xl transition-all text-left group",
+                            historyIndex === idx ? "bg-primary/10 border border-primary/20 shadow-inner" : "hover:bg-white/5 border border-transparent"
+                          )}
+                        >
+                          <div className="w-14 h-14 rounded-xl overflow-hidden bg-black/40 shrink-0 border border-white/10 group-hover:scale-105 transition-transform">
+                            <img src={url} alt={`V${idx}`} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className={cn(
+                              "text-xs font-black tracking-tight truncate",
+                              historyIndex === idx ? "text-primary" : "text-foreground"
+                            )}>
+                              {idx === 0 ? 'SOURCE IMAGE' : `ITERATION ${idx}`}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground/60 font-bold uppercase tracking-tighter mt-0.5">
+                              {idx === historyIndex ? 'Active View' : 'Restore Version'}
+                            </p>
+                          </div>
+                          {historyIndex === idx && (
+                            <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
+                              <Check size={12} className="text-white" />
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <button 
+                onClick={handleRedo}
+                disabled={historyIndex === history.length - 1 || isLoading}
+                className="p-3 rounded-xl hover:bg-white/5 transition-all disabled:opacity-20 text-muted-foreground hover:text-primary group"
+                title="Redo"
+              >
+                <RotateCcw size={20} className="group-active:rotate-[45deg] transition-transform" />
+              </button>
+            </div>
+            
+            <div className="h-10 w-px bg-white/5 mx-1" />
+            
+            <button 
+              onClick={onClose} 
+              className="w-12 h-12 rounded-[1.25rem] glass hover:bg-destructive hover:text-white transition-all text-muted-foreground group flex items-center justify-center"
+            >
+              <X size={24} className="group-hover:rotate-90 transition-transform duration-500" />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 flex min-h-0 overflow-hidden bg-background/20">
+          {/* Vertical Sidebar Rail */}
+          <nav className="w-24 border-r border-white/5 flex flex-col items-center py-8 gap-4 bg-background/40 backdrop-blur-xl shrink-0 z-20">
+            {[
+              { id: 'style', icon: <Palette size={22} />, label: 'Style' },
+              { id: 'transfer', icon: <Sparkles size={22} />, label: 'Transfer' },
+              { id: 'brush', icon: <Brush size={22} />, label: 'Magic' },
+              { id: 'adjust', icon: <Sliders size={22} />, label: 'Adjust' },
+              { id: 'filters', icon: <Droplets size={22} />, label: 'Filter' },
+              { id: 'lighting', icon: <Sun size={22} />, label: 'Light' },
+              { id: 'batch', icon: <Layers size={22} />, label: 'Batch' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={cn(
+                  "w-16 h-16 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all relative group",
+                  activeTab === tab.id 
+                    ? "bg-primary text-white shadow-xl shadow-primary/30 scale-110 z-10" 
+                    : "text-muted-foreground hover:text-foreground hover:bg-white/5 hover:scale-105"
+                )}
+              >
+                <div className="transition-transform group-active:scale-90 duration-200">
+                  {tab.icon}
+                </div>
+                <span className={cn(
+                  "text-[8px] font-black uppercase tracking-[0.1em] transition-opacity",
+                  activeTab === tab.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                )}>
+                  {tab.label}
+                </span>
+                {activeTab === tab.id && (
+                  <motion.div 
+                    layoutId="rail-indicator" 
+                    className="absolute -right-[1.1px] top-4 bottom-4 w-1 bg-primary rounded-l-full shadow-[0_0_10px_rgba(124,58,237,0.5)]" 
+                  />
+                )}
+              </button>
+            ))}
+          </nav>
+
+          {/* Tools Panel Detail */}
+          <aside className="w-[400px] border-r border-white/5 flex flex-col bg-background/20 backdrop-blur-md overflow-hidden shrink-0">
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-8">
+              <AnimatePresence mode="wait">
+                {activeTab === 'style' && (
+                  <motion.div 
+                    key="style"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Artistic Styles</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {STYLE_EDITS.map((edit) => (
+                        <button
+                          key={edit.label}
+                          onClick={() => { 
+                            setPrompt(edit.prompt); 
+                            setSelectedEffect(edit.label);
+                            handleEdit(edit.prompt) 
+                          }}
+                          disabled={isLoading}
+                          className={cn(
+                            "group relative py-3 px-4 rounded-2xl border transition-all text-xs font-bold text-left overflow-hidden",
+                            selectedEffect === edit.label 
+                              ? "border-primary bg-primary/10 text-primary shadow-lg shadow-primary/10" 
+                              : "border-white/10 bg-white/5 hover:border-primary/40 hover:bg-white/10"
+                          )}
+                        >
+                          <span>{edit.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
+                {activeTab === 'transfer' && (
+                  <motion.div 
+                    key="transfer"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-6"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Style Transfer</p>
+                      {referenceUrl && (
+                        <button 
+                          onClick={() => setReferenceUrl(null)}
+                          className="text-[10px] font-black text-destructive hover:underline"
+                        >
+                          CLEAR SELECTION
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-6">
+                      {/* Selection Preview (if active) */}
+                      {referenceUrl && (
+                        <div className="space-y-4">
+                          <div className="aspect-[4/3] rounded-2xl bg-black overflow-hidden border-2 border-primary shadow-2xl relative group">
+                            <img 
+                              src={referenceUrl} 
+                              alt="Reference" 
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <button 
+                                onClick={() => setReferenceUrl(null)}
+                                className="w-10 h-10 rounded-full bg-destructive text-white flex items-center justify-center shadow-lg"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                            </div>
+                            <div className="absolute top-3 left-3 bg-primary text-white text-[8px] font-black uppercase px-2 py-1 rounded-full">
+                              ACTIVE STYLE
+                            </div>
+                          </div>
+                          <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl">
+                            <div className="flex items-start gap-3">
+                              <Sparkles size={16} className="text-primary mt-0.5 shrink-0" />
+                              <p className="text-[10px] leading-relaxed text-muted-foreground font-medium">
+                                Style selected! Fine-tune the settings below or click <span className="font-bold text-primary">Bake</span> to apply.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Upload Section */}
+                      <div className="relative group">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleReferenceUpload}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          disabled={isUploadingReference}
+                        />
+                        <div className={cn(
+                          "border-2 border-dashed rounded-2xl p-6 flex flex-col items-center gap-2 transition-all",
+                          isUploadingReference ? "bg-muted animate-pulse border-primary/40" : "border-white/10 bg-white/5 hover:border-primary/40 hover:bg-white/10"
+                        )}>
+                          {isUploadingReference ? (
+                            <Loader2 size={20} className="animate-spin text-primary" />
+                          ) : (
+                            <Upload size={20} className="text-muted-foreground group-hover:text-primary transition-colors" />
+                          )}
+                          <div className="text-center">
+                            <p className="text-[10px] font-bold uppercase tracking-tight">Upload Custom Style</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Custom Styles Gallery */}
+                      {customStyles.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">My Uploads</p>
+                            <span className="text-[8px] font-bold text-muted-foreground/50">{customStyles.length} IMAGES</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {customStyles.map((style, idx) => (
+                              <div key={style.timestamp} className="relative group aspect-square">
+                                <button
+                                  onClick={() => setReferenceUrl(style.url)}
+                                  className={cn(
+                                    "w-full h-full rounded-xl overflow-hidden border transition-all",
+                                    referenceUrl === style.url ? "border-primary ring-2 ring-primary/20" : "border-white/10 hover:border-primary/30"
+                                  )}
+                                >
+                                  <img src={style.url} className="w-full h-full object-cover" />
+                                </button>
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (referenceUrl === style.url) setReferenceUrl(null);
+                                    setCustomStyles(prev => prev.filter(s => s.url !== style.url));
+                                  }}
+                                  className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-white items-center justify-center opacity-0 group-hover:flex transition-opacity z-20"
+                                >
+                                  <X size={10} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Curated Styles Gallery */}
+                      <div className="space-y-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Curated Library</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {STYLE_TRANSFER_PRESETS.map((preset) => (
+                            <button
+                              key={preset.label}
+                              onClick={() => setReferenceUrl(preset.url)}
+                              className={cn(
+                                "group relative aspect-[4/3] rounded-xl overflow-hidden border transition-all",
+                                referenceUrl === preset.url ? "border-primary ring-2 ring-primary/20" : "border-white/10 hover:border-primary/50"
+                              )}
+                            >
+                              <img 
+                                src={preset.url} 
+                                alt={preset.label} 
+                                className={cn(
+                                  "w-full h-full object-cover transition-all",
+                                  referenceUrl === preset.url ? "grayscale-0" : "grayscale-[0.5] group-hover:grayscale-0"
+                                )} 
+                              />
+                              <div className="absolute inset-0 bg-black/40 flex items-end p-2">
+                                <span className="text-[10px] font-bold text-white truncate">{preset.label}</span>
+                              </div>
+                              {referenceUrl === preset.url && (
+                                <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-primary flex items-center justify-center">
+                                  <Check size={8} className="text-white" />
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {referenceUrl && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <Settings2 size={14} className="text-primary" />
+                            <span className="text-xs font-black uppercase tracking-widest">Preset Configs</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { id: 'balanced', label: 'Balanced', values: { style: 80, content: 70, color: 20, texture: 50 } },
+                            { id: 'fidelity', label: 'High Fidelity', values: { style: 40, content: 95, color: 80, texture: 30 } },
+                            { id: 'artistic', label: 'Artistic Max', values: { style: 100, content: 30, color: 0, texture: 100 } },
+                            { id: 'creative', label: 'Creative', values: { style: 70, content: 50, color: 40, texture: 80 } },
+                          ].map((config) => (
+                            <button
+                              key={config.id}
+                              onClick={() => {
+                                setStyleIntensity(config.values.style);
+                                setContentPreservation(config.values.content);
+                                setColorPreservation(config.values.color);
+                                setTextureDetail(config.values.texture);
+                              }}
+                              className="py-2 px-3 rounded-xl border border-white/10 bg-white/5 transition-all text-[10px] font-bold text-left hover:border-primary/30"
+                            >
+                              {config.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {referenceUrl && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <Settings2 size={14} className="text-primary" />
+                            <span className="text-xs font-black uppercase tracking-widest">Transfer Method</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { id: 'neural', label: 'Neural Fusion', desc: 'Balanced integration' },
+                            { id: 'cyclegan', label: 'CycleGAN', desc: 'Structural mapping' },
+                            { id: 'wgan', label: 'WGAN', desc: 'Stable synthesis' },
+                          ].map((method) => (
+                            <button
+                              key={method.id}
+                              onClick={() => setTransferMethod(method.id as any)}
+                              className={cn(
+                                "flex flex-col items-center gap-1 p-2 rounded-xl border transition-all text-center",
+                                transferMethod === method.id 
+                                  ? "border-primary bg-primary/10 text-primary" 
+                                  : "border-white/10 bg-white/5 hover:border-primary/30"
+                              )}
+                            >
+                              <span className="text-[10px] font-black uppercase tracking-tighter">{method.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Style Intensity Slider */}
+                    {referenceUrl && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setStyleIntensity(80)}>
+                            <Sliders size={14} className="text-primary" />
+                            <span className="text-xs font-black uppercase tracking-widest group-hover:text-primary transition-colors">Style Influence</span>
+                            <RotateCcw size={10} className="opacity-0 group-hover:opacity-50 transition-opacity" />
+                          </div>
+                          <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{styleIntensity}%</span>
+                        </div>
+                        <div className="space-y-1">
+                          <input 
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={styleIntensity}
+                            onChange={(e) => setStyleIntensity(parseInt(e.target.value))}
+                            className="w-full h-1.5 studio-slider"
+                          />
+                          <div className="flex justify-between px-1">
+                            <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-[0.2em] opacity-40">Subtle</span>
+                            <span className="text-[8px] font-bold text-muted-foreground uppercase tracking-[0.2em] opacity-40">Bold</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Content Preservation Slider */}
+                    {referenceUrl && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setContentPreservation(70)}>
+                            <Eye size={14} className="text-primary" />
+                            <span className="text-xs font-black uppercase tracking-widest group-hover:text-primary transition-colors">Content Lock</span>
+                            <RotateCcw size={10} className="opacity-0 group-hover:opacity-50 transition-opacity" />
+                          </div>
+                          <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{contentPreservation}%</span>
+                        </div>
+                        <input 
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={contentPreservation}
+                          onChange={(e) => setContentPreservation(parseInt(e.target.value))}
+                          className="w-full h-1.5 studio-slider"
+                        />
+                      </div>
+                    )}
+
+                    {/* Color Preservation Slider */}
+                    {referenceUrl && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setColorPreservation(20)}>
+                            <Palette size={14} className="text-primary" />
+                            <span className="text-xs font-black uppercase tracking-widest group-hover:text-primary transition-colors">Color Retention</span>
+                            <RotateCcw size={10} className="opacity-0 group-hover:opacity-50 transition-opacity" />
+                          </div>
+                          <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{colorPreservation}%</span>
+                        </div>
+                        <input 
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={colorPreservation}
+                          onChange={(e) => setColorPreservation(parseInt(e.target.value))}
+                          className="w-full h-1.5 studio-slider"
+                        />
+                      </div>
+                    )}
+
+                    {/* Texture Detail Slider */}
+                    {referenceUrl && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 group cursor-pointer" onClick={() => setTextureDetail(50)}>
+                            <Brush size={14} className="text-primary" />
+                            <span className="text-xs font-black uppercase tracking-widest group-hover:text-primary transition-colors">Texture Detail</span>
+                            <RotateCcw size={10} className="opacity-0 group-hover:opacity-50 transition-opacity" />
+                          </div>
+                          <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{textureDetail}%</span>
+                        </div>
+                        <input 
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={textureDetail}
+                          onChange={(e) => setTextureDetail(parseInt(e.target.value))}
+                          className="w-full h-1.5 studio-slider"
+                        />
+                      </div>
+                    )}
+
+                    {/* High Quality Toggle */}
+                    {referenceUrl && (
+                      <div className="pt-4 border-t border-white/10">
+                        <button 
+                          onClick={() => setIsHighQuality(!isHighQuality)}
+                          className={cn(
+                            "w-full flex items-center justify-between p-4 rounded-2xl border transition-all",
+                            isHighQuality ? "border-primary bg-primary/5 text-primary" : "border-white/10 hover:border-primary/30"
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Zap size={16} className={isHighQuality ? "text-amber-500" : "text-muted-foreground"} />
+                            <div className="text-left">
+                              <p className="text-xs font-black uppercase tracking-widest">Pro Rendering</p>
+                              <p className="text-[10px] text-muted-foreground font-medium">Higher detail & texture fidelity</p>
+                            </div>
+                          </div>
+                          <div className={cn(
+                            "w-10 h-6 rounded-full p-1 transition-colors relative",
+                            isHighQuality ? "bg-primary" : "bg-muted"
+                          )}>
+                            <div className={cn(
+                              "w-4 h-4 rounded-full bg-white transition-transform shadow-sm",
+                              isHighQuality ? "translate-x-4" : "translate-x-0"
+                            )} />
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+
+                {activeTab === 'brush' && (
+                  <motion.div 
+                    key="brush"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-6"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Magic Brush (Inpainting)</p>
+                      <button 
+                        onClick={clearMask}
+                        className="text-[10px] font-black text-primary hover:underline"
+                      >
+                        CLEAR MASK
+                      </button>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setIsEraser(false)}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border transition-all text-xs font-bold",
+                          !isEraser ? "border-primary bg-primary/10 text-primary" : "border-white/10 bg-white/5"
+                        )}
+                      >
+                        <Brush size={14} />
+                        Brush
+                      </button>
+                      <button
+                        onClick={() => setIsEraser(true)}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl border transition-all text-xs font-bold",
+                          isEraser ? "border-primary bg-primary/10 text-primary" : "border-white/10 bg-white/5"
+                        )}
+                      >
+                        <Eraser size={14} />
+                        Eraser
+                      </button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase tracking-widest text-muted-foreground/60">Brush Size</span>
+                        <span className="text-xs font-black text-primary">{brushSize}px</span>
+                      </div>
+                      <input 
+                        type="range"
+                        min="5"
+                        max="100"
+                        value={brushSize}
+                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-muted rounded-full appearance-none cursor-pointer accent-primary"
+                      />
+                    </div>
+
+                    <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl mt-4">
+                      <div className="flex items-start gap-3">
+                        <Sparkles size={16} className="text-primary mt-0.5 shrink-0" />
+                        <p className="text-[10px] leading-relaxed text-muted-foreground font-medium">
+                          Paint over the area you want to change, then describe the transformation in the box below and click <span className="font-bold text-primary">Bake</span>.
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {activeTab === 'adjust' && (
+                  <motion.div 
+                    key="adjust"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-8"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Pro Adjustments</p>
+                      <button 
+                        onClick={() => {
+                          setAdjustments({ brightness: 100, contrast: 100, saturation: 100, hue: 0, blur: 0 });
+                        }}
+                        className="text-[10px] font-black text-primary hover:underline"
+                      >
+                        RESET ALL
+                      </button>
+                    </div>
+
+                    {[
+                      { label: 'Brightness', icon: <SunMedium size={14} />, value: adjustments.brightness, key: 'brightness', min: 0, max: 200 },
+                      { label: 'Contrast', icon: <Contrast size={14} />, value: adjustments.contrast, key: 'contrast', min: 0, max: 200 },
+                      { label: 'Saturation', icon: <Droplets size={14} />, value: adjustments.saturation, key: 'saturation', min: 0, max: 200 },
+                      { label: 'Hue Rotate', icon: <Palette size={14} />, value: adjustments.hue, key: 'hue', min: -180, max: 180 },
+                      { label: 'Blur', icon: <ImageIcon size={14} />, value: adjustments.blur, key: 'blur', min: 0, max: 10 },
+                    ].map((adj) => (
+                      <div key={adj.label} className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3 text-muted-foreground group">
+                            <div className="w-8 h-8 rounded-xl bg-white/5 flex items-center justify-center group-hover:text-primary transition-all shadow-inner group-hover:scale-110">
+                              {adj.icon}
+                            </div>
+                            <span className="text-xs font-black uppercase tracking-widest">{adj.label}</span>
+                          </div>
+                          <span className="text-xs font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">{adj.value}{adj.key === 'hue' ? '°' : adj.key === 'blur' ? 'px' : '%'}</span>
+                        </div>
+                        <div className="relative py-2">
+                          <input 
+                            type="range"
+                            min={adj.min}
+                            max={adj.max}
+                            value={adj.value}
+                            onChange={(e) => setAdjustments(prev => ({ ...prev, [adj.key]: parseInt(e.target.value) }))}
+                            className="w-full h-1.5 studio-slider"
+                          />
+                        </div>
+                      </div>
+                    ))}
+
+                    <div className="p-4 bg-primary/5 border border-primary/20 rounded-2xl mt-4">
+                      <div className="flex items-start gap-3">
+                        <Sparkles size={16} className="text-primary mt-0.5 shrink-0" />
+                        <p className="text-[10px] leading-relaxed text-muted-foreground font-medium">
+                          Adjustments are applied in real-time. Click <span className="font-bold text-primary">Bake</span> to fix these changes permanently into a new version using AI.
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {activeTab === 'filters' && (
+                  <motion.div 
+                    key="filters"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Preset Filters</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {FILTER_PRESETS.map((filter) => (
+                        <button
+                          key={filter.label}
+                          onClick={() => {
+                            setPrompt(filter.prompt);
+                            setSelectedEffect(filter.label);
+                            handleEdit(filter.prompt);
+                          }}
+                          disabled={isLoading}
+                          className={cn(
+                            "group flex flex-col gap-3 p-2 rounded-2xl border transition-all",
+                            selectedEffect === filter.label 
+                              ? "border-primary bg-primary/10" 
+                              : "border-white/10 hover:border-primary/40"
+                          )}
+                        >
+                          <div className="aspect-[4/3] rounded-xl bg-black overflow-hidden relative shadow-inner">
+                            <img 
+                              src={url} 
+                              alt={filter.label} 
+                              style={{ filter: filter.filter }}
+                              className="w-full h-full object-cover opacity-70 group-hover:opacity-100 transition-opacity"
+                            />
+                            {selectedEffect === filter.label && (
+                              <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                                <Check size={20} className="text-white" />
+                              </div>
+                            )}
+                          </div>
+                          <span className={cn(
+                            "text-[10px] font-black uppercase tracking-widest px-1 pb-1",
+                            selectedEffect === filter.label ? "text-primary" : "text-muted-foreground"
+                          )}>
+                            {filter.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
+                {activeTab === 'lighting' && (
+                  <motion.div 
+                    key="lighting"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Lighting Effects</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {LIGHTING_EDITS.map((edit) => (
+                        <button
+                          key={edit.label}
+                          onClick={() => { 
+                            setPrompt(edit.prompt); 
+                            setSelectedEffect(edit.label);
+                            handleEdit(edit.prompt) 
+                          }}
+                          disabled={isLoading}
+                          className={cn(
+                            "py-3 px-4 rounded-2xl border transition-all text-xs font-bold text-left",
+                            selectedEffect === edit.label 
+                              ? "border-primary bg-primary/10 text-primary shadow-lg shadow-primary/10" 
+                              : "border-white/10 bg-white/5 hover:border-primary/40 hover:bg-white/10"
+                          )}
+                        >
+                          {edit.label}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
+                {activeTab === 'batch' && (
+                  <motion.div 
+                    key="batch"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    className="space-y-6"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Batch Processing</p>
+                      {batchUrls.length > 0 && (
+                        <button 
+                          onClick={() => { setBatchUrls([]); setBatchResults([]); }}
+                          className="text-[10px] font-black text-destructive hover:underline"
+                        >
+                          CLEAR ALL
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={handleBatchUpload}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        disabled={isLoading}
+                      />
+                      <div className={cn(
+                        "border-2 border-dashed border-white/10 rounded-2xl p-8 flex flex-col items-center gap-3 transition-all",
+                        isLoading ? "bg-muted animate-pulse" : "bg-white/5 hover:border-primary/40 hover:bg-white/10"
+                      )}>
+                        <Layers size={24} className="text-muted-foreground" />
+                        <div className="text-center">
+                          <p className="text-xs font-bold uppercase tracking-tight">Upload Batch Images</p>
+                          <p className="text-[10px] text-muted-foreground mt-1">Select multiple images to process</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {batchUrls.length > 0 && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Queue ({batchUrls.length} images)</span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2">
+                          {batchUrls.map((bUrl, idx) => (
+                            <div key={idx} className="aspect-square rounded-lg bg-black border border-white/10 overflow-hidden relative">
+                              <img src={bUrl} className="w-full h-full object-cover opacity-60" />
+                              {isProcessingBatch && batchProgress.current > idx && (
+                                <div className="absolute inset-0 bg-emerald-500/40 flex items-center justify-center">
+                                  <Check size={12} className="text-white" />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {isProcessingBatch && (
+                          <div className="space-y-3 p-4 glass rounded-2xl border-white/5">
+                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                              <span className="text-primary animate-pulse">Processing Batch...</span>
+                              <span>{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
+                            </div>
+                            <div className="h-2 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                              <motion.div 
+                                className="h-full bg-gradient-to-r from-primary to-accent shadow-[0_0_15px_rgba(124,58,237,0.5)]"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+                                transition={{ type: 'spring', damping: 20 }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={processBatch}
+                          disabled={isLoading || isProcessingBatch || !prompt.trim()}
+                          className="w-full py-5 rounded-[1.5rem] bg-primary text-white text-xs font-black uppercase tracking-[0.2em] hover:shadow-2xl hover:shadow-primary/40 transition-all flex items-center justify-center gap-3 relative overflow-hidden group active:scale-95"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:animate-[shimmer_2s_infinite] pointer-events-none" />
+                          {isProcessingBatch ? <Loader2 size={18} className="animate-spin" /> : <Zap size={18} />}
+                          Run Batch Transformation
+                        </button>
+                      </div>
+                    )}
+
+                    {batchResults.length > 0 && (
+                      <div className="pt-6 border-t border-white/10 space-y-4">
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">Results</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {batchResults.map((res, idx) => (
+                            <div key={idx} className="space-y-2 group">
+                              <div className="aspect-square rounded-xl bg-black border border-white/10 overflow-hidden relative">
+                                <img src={res.edited} className="w-full h-full object-cover" />
+                                <button 
+                                  onClick={() => onApplyResult?.(res.edited)}
+                                  className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-black uppercase"
+                                >
+                                  Apply to Chat
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Intensity Slider - Only for Style/Light */}
+              {(activeTab === 'style' || activeTab === 'lighting') && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="pt-6 border-t border-white/10"
+                >
+                  <div className="bg-primary/5 p-4 rounded-2xl border border-primary/10 shadow-inner">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sliders size={14} className="text-primary" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Effect Strength</span>
+                      </div>
+                      <span className="text-xs font-black text-primary">{intensity}%</span>
+                    </div>
+                    <input 
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={intensity}
+                      onChange={(e) => setIntensity(parseInt(e.target.value))}
+                      className="w-full h-1.5 bg-muted rounded-full appearance-none cursor-pointer accent-primary hover:accent-primary/80 transition-all"
+                    />
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Pro Enhancements - Always at bottom */}
+              <div className="pt-4">
+                <div className="border border-white/10 rounded-2xl overflow-hidden bg-white/5 transition-all">
+                  <button 
+                    onClick={() => setEnhancementsOpen(!enhancementsOpen)}
+                    className="w-full flex items-center justify-between px-4 py-4 hover:bg-white/10 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Zap size={16} className="text-amber-500" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">PRO Enhancements</span>
+                    </div>
+                    {enhancementsOpen ? <ChevronDown size={16} className="text-muted-foreground" /> : <ChevronUp size={16} className="text-muted-foreground" />}
+                  </button>
+                  
+                  {enhancementsOpen && (
+                    <div className="p-4 grid grid-cols-2 gap-2 border-t border-white/10 bg-card/30">
+                      {ENHANCE_EDITS.map((edit) => (
+                        <button
+                          key={edit.label}
+                          onClick={() => { 
+                            setPrompt(edit.prompt); 
+                            setSelectedEffect(edit.label);
+                            handleEdit(edit.prompt) 
+                          }}
+                          disabled={isLoading}
+                          className={cn(
+                            "flex items-center gap-3 p-3 rounded-xl border transition-all disabled:opacity-50 text-[10px] font-black uppercase tracking-widest",
+                            selectedEffect === edit.label ? "border-primary bg-primary/10 text-primary" : "border-white/10 bg-white/5 hover:border-primary/40 hover:bg-white/10"
+                          )}
+                        >
+                          <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                            {edit.icon}
+                          </div>
+                          {edit.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Prompt Box */}
+            <div className="p-6 border-t border-white/10 bg-white/5 space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/70">Custom Logic</p>
+                {error && <p className="text-[10px] font-bold text-destructive animate-pulse">{error}</p>}
+              </div>
+              <div className="flex gap-2">
+                <div className="relative flex-1 group">
+                  <input
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleEdit(prompt)}
+                    placeholder="Type a custom magic change..."
+                    className="w-full text-xs font-bold pl-4 pr-10 py-3.5 rounded-2xl border border-white/10 bg-background focus:outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all placeholder:font-medium placeholder:text-muted-foreground/40 group-hover:border-primary/40"
+                  />
+                  <Wand2 size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground/40 group-hover:text-primary transition-colors" />
+                </div>
+                <button
+                  onClick={() => handleEdit(prompt)}
+                  disabled={isLoading || !prompt.trim()}
+                  className="px-10 py-4 rounded-[1.5rem] bg-primary text-white text-xs font-black uppercase tracking-[0.15em] hover:shadow-2xl hover:shadow-primary/40 transition-all disabled:opacity-30 disabled:shadow-none flex items-center gap-3 group relative overflow-hidden active:scale-95"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 -translate-x-full group-hover:animate-[shimmer_2s_infinite] pointer-events-none" />
+                  {isLoading ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Zap size={18} className="group-hover:scale-125 transition-transform" />
+                  )}
+                  <span>Bake Image</span>
+                </button>
+              </div>
+            </div>
+          </aside>
+
+          {/* Workspace Area */}
+          <div className="flex-1 p-8 flex flex-col gap-6 overflow-hidden">
+            <div 
+              ref={workspaceRef}
+              className="flex-1 relative group bg-black/40 rounded-[3rem] border border-white/5 overflow-hidden flex items-center justify-center shadow-2xl ring-1 ring-white/5"
+            >
+              <AnimatePresence mode="wait">
+                <motion.div 
+                  key={currentUrl + showOriginal}
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.02 }}
+                  transition={{ duration: 0.3 }}
+                  className="w-full h-full flex items-center justify-center relative"
+                >
+                  <img 
+                    src={showOriginal ? url : currentUrl} 
+                    alt="Result" 
+                    style={{ filter: showOriginal ? 'none' : getFilterString() }}
+                    className="max-w-full max-h-full w-auto h-auto object-contain transition-all duration-300 rounded-lg shadow-2xl"
+                  />
+                  
+                  {/* Drawing Canvas */}
+                  {activeTab === 'brush' && !showOriginal && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <canvas
+                        ref={canvasRef}
+                        onMouseDown={startDrawing}
+                        onMouseMove={draw}
+                        onMouseUp={stopDrawing}
+                        onMouseLeave={() => { stopDrawing(); setIsHoveringCanvas(false); }}
+                        onMouseEnter={() => setIsHoveringCanvas(true)}
+                        onTouchStart={startDrawing}
+                        onTouchMove={draw}
+                        onTouchEnd={stopDrawing}
+                        width={1024} // Internal resolution
+                        height={1024}
+                        className="w-auto h-auto max-w-full max-h-full object-contain pointer-events-auto cursor-crosshair"
+                      />
+                      
+                      {/* Brush Cursor Preview */}
+                      {isHoveringCanvas && (
+                        <div 
+                          className="absolute pointer-events-none border-2 border-primary/50 rounded-full bg-primary/10"
+                          style={{
+                            width: brushSize,
+                            height: brushSize,
+                            left: mousePos.x,
+                            top: mousePos.y,
+                            transform: 'translate(-50%, -50%)',
+                            zIndex: 30
+                          }}
+                        />
+                      )}
+
+                      {/* Remote Cursors */}
+                      {Object.entries(remoteBrushPos).map(([uid, pos]) => {
+                        const remoteUser = onlineUsers.find(u => u.userId === uid)
+                        if (!remoteUser) return null
+                        return (
+                          <div
+                            key={uid}
+                            className="absolute pointer-events-none z-40 transition-all duration-75 ease-linear"
+                            style={{ left: pos.x, top: pos.y, transform: 'translate(-50%, -50%)' }}
+                          >
+                            <div 
+                              className="w-4 h-4 rounded-full border border-white shadow-lg"
+                              style={{ backgroundColor: pos.color }}
+                            />
+                            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 px-1.5 py-0.5 bg-black/80 backdrop-blur-md rounded text-[6px] font-black text-white uppercase whitespace-nowrap">
+                              {remoteUser.metadata?.displayName || 'Editor'}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+
+              {/* Status Ticker */}
+              {isLoading && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-2xl flex items-center gap-4 z-10 shadow-2xl shadow-primary/20 min-w-[240px]"
+                >
+                  <div className="relative">
+                    <Loader2 size={24} className="animate-spin text-primary" />
+                    <Wand2 size={12} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white animate-pulse" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-black uppercase tracking-widest text-white">AI Processing</span>
+                    <span className="text-[10px] text-primary/80 font-bold animate-pulse">{LOADING_MESSAGES[loadingMsgIndex]}</span>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* View Controls */}
+              <div className="absolute top-6 left-6 flex flex-col gap-3">
+                <button 
+                  onMouseDown={() => setShowOriginal(true)}
+                  onMouseUp={() => setShowOriginal(false)}
+                  onMouseLeave={() => setShowOriginal(false)}
+                  className="w-12 h-12 rounded-2xl glass border border-white/10 flex items-center justify-center text-white hover:bg-primary transition-all shadow-xl group"
+                  title="Hold to see original"
+                >
+                  <Eye size={20} className="group-hover:scale-110 transition-transform" />
+                </button>
+              </div>
+
+              {history.length > 1 && (
+                <div className="absolute bottom-6 right-6 flex items-center gap-2 glass border border-white/10 p-2 rounded-2xl">
+                  <History size={14} className="text-white/40 ml-2" />
+                  <span className="text-[10px] font-black text-white px-2 tracking-tighter">VER {historyIndex + 1} / {history.length}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="px-10 py-6 border-t border-white/5 bg-background/40 backdrop-blur-xl flex items-center justify-between shrink-0 sticky bottom-0 z-20">
+          <button 
+            onClick={handleReset}
+            className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60 hover:text-foreground transition-all flex items-center gap-2 group"
+          >
+            <RotateCcw size={12} className="group-hover:rotate-[-90deg] transition-transform" />
+            Discard Session
+          </button>
+
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => onApplyResult?.(currentUrl)}
+              className="px-8 py-4 rounded-[1.25rem] glass text-xs font-black uppercase tracking-[0.15em] hover:bg-white/10 hover:border-white/20 transition-all active:scale-95"
+            >
+              Export to Chat
+            </button>
+            <button 
+              onClick={() => onApplyResult?.(currentUrl)}
+              className="px-10 py-4 rounded-[1.25rem] bg-foreground text-background text-xs font-black uppercase tracking-[0.15em] hover:shadow-2xl transition-all hover:scale-105 active:scale-95 shadow-xl"
+            >
+              Finalize Version
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
